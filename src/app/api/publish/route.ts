@@ -134,6 +134,21 @@ export async function POST(request: Request) {
     });
   }
 
+  // Pre-warm the card render before asking Instagram to fetch it. Measured
+  // in production: a cold Vercel instance takes ~11s for this route (fonts,
+  // the gist LLM call, and stock photo search are all cold on first hit);
+  // the same URL warm takes ~0.4s. Instagram's own image-fetcher times out
+  // well under 11s, failing with "media could not be fetched from this
+  // URI" — a real error seen in production. Fetching it ourselves first
+  // means Instagram's actual fetch (inside publishImage() below) lands on
+  // an already-warm instance. Best-effort: if this fails, publishImage()
+  // surfaces the real problem when Instagram itself tries to fetch it.
+  try {
+    await fetch(imageUrl, { signal: AbortSignal.timeout(45_000) });
+  } catch {
+    // Ignored — see comment above.
+  }
+
   try {
     const mediaId = await publishImage(channel.id, imageUrl, caption);
     return NextResponse.json({ posted: true, channel: channel.id, tweetUrl: newUrl, imageUrl, mediaId });
